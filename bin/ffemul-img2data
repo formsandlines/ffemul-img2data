@@ -1,10 +1,108 @@
 #!/usr/bin/env bb
 
-(ns ffemul-img2data)
+(ns ffemul-img2data
+  (:require [babashka.process :refer [shell]]
+            [babashka.fs :as fs]
+            ;; [clojure.java.io :as io]
+            [clojure.edn :as edn]
+            [clojure.string :as str]))
+
+(def parse-int #(edn/read-string %))
+
+(defn parse-line
+  [line]
+  (let [[pos-s rgb-s] (str/split line #" ")
+        pos (mapv parse-int (-> pos-s
+                                (subs 0 (dec (count pos-s)))
+                                (str/split  #",")))
+        rgb (mapv parse-int (-> rgb-s
+                                (subs 1 (dec (count rgb-s)))
+                                (str/split  #",")))]
+    [pos rgb]))
+
+(defn parse-size
+  [size-s]
+  (mapv edn/read-string (str/split size-s #",")))
+
+(defn parse-image-data
+  [img-data img-size cell-w stroke-w]
+  (let [[width _] (parse-size img-size)
+        cell-w (parse-int cell-w)
+        stroke-w (parse-int stroke-w)
+        cell-dist (+ cell-w stroke-w)]
+    (->> (for [line (drop 1 (str/split img-data #"\n"))
+               :let [[[x y] rgb] (parse-line line)]
+               :when (and (= stroke-w (mod x cell-dist))
+                          (= stroke-w (mod y cell-dist)))]
+           (let [[r? g? b? :as xs] (map #(> % 50) rgb)
+                 v (cond r? :U g? :I b? :M
+                         :else :N)]
+             (assert (< (count (filter true? xs)) 2))
+             v))
+         (partitionv (/ width cell-dist))
+         vec)))
+
+(defn read-image
+  [input-file]
+  {:size (:out (shell {:out :string} "identify" "-format" "%w,%h" input-file))
+   :data (:out (shell {:out :string} "magick" input-file "txt:"))})
+
+(defn write-edn
+  [data file-path]
+  (spit file-path data))
 
 (defn -main [& args]
-  (println "Hello from my namespace!" args))
+  (if (< (count args) 2)
+    (println "Usage: ffemul-img2data <input-image> <output-edn> <cell-width> <stroke-width>")
+    (let [[input-file output-file cell-w stroke-w] args
+          {:keys [data size]}
+          (try (read-image input-file)
+               (catch Exception e
+                 (println "Error processing image: " (.getMessage e))))
+          edn-data (parse-image-data data size cell-w stroke-w)]
+      (try (write-edn edn-data output-file)
+           (println "Output written to: " output-file)
+           (catch Exception e
+             (println "Error writing output: " (.getMessage e)))))))
 
-;; This ensures -main is called when the script is executed directly
 (when (= *file* (System/getProperty "babashka.file"))
   (apply -main *command-line-args*))
+
+
+
+(comment
+  (def path (str (fs/cwd) "/test/"))
+  (def filename "ex1.png")
+
+  (def raw (:out (shell {:out :string} "convert" (str path filename) "txt:")))
+
+  (parse-size
+   (:out (shell {:out :string} "identify" "-format" "%w,%h" (str path filename))))
+
+  (->> (for [line (drop 1 (str/split raw #"\n"))
+             :let [[[x y :as pos] rgb] (parse-line line)]
+             :when (and (= 1 (mod x 4))
+                        (= 1 (mod y 4)))]
+         (let [[r? g? b? :as xs] (map #(> % 50) rgb)
+               v (cond r? :U g? :I b? :M
+                       :else :N)]
+           (assert (< (count (filter true? xs)) 2))
+           v))
+       (partitionv (/ 640 4))
+       (drop 1)
+       (first)
+       (take 14))
+
+  (let [line "36,155: (48,48,47)  #30302F  srgb(48,48,47)"
+        [pos-s rgb-s] (str/split line #" ")
+        pos (mapv edn/read-string
+                  (-> pos-s
+                      (subs 0 (dec (count pos-s)))
+                      (str/split  #",")))
+        rgb (mapv edn/read-string
+                  (-> rgb-s
+                      (subs 1 (dec (count rgb-s)))
+                      (str/split  #",")))]
+    [pos rgb])
+  
+  ,)
