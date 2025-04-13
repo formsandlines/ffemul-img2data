@@ -1,0 +1,13 @@
+{:dirs ["bin"]
+ :tasks
+ {:requires ([babashka.fs :as fs])
+  :init (do
+          (def version "0.1.0")
+          (def project-name "ffemul-img2data"))
+
+  exec {:doc "Run the script"
+        :task (apply shell "./bin/ffemul-img2data" *command-line-args*)}
+
+  install {:doc "Install the script globally"
+           :task (do ;; TODO
+                   nil)}}}

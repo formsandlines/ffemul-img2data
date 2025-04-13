@@ -1,0 +1,10 @@
+#!/usr/bin/env bb
+
+(ns ffemul-img2data)
+
+(defn -main [& args]
+  (println "Hello from my namespace!" args))
+
+;; This ensures -main is called when the script is executed directly
+(when (= *file* (System/getProperty "babashka.file"))
+  (apply -main *command-line-args*))

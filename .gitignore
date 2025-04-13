@@ -1,0 +1,7 @@
+.DS_STORE
+.editorconfig
+.nrepl-port
+.backups
+.clj-kondo/
+.lsp/
+.cpcache/
