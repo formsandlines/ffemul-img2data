@@ -27,8 +27,6 @@
 (defn parse-image-data
   [img-data img-size cell-w stroke-w]
   (let [[width _] (parse-size img-size)
-        cell-w (parse-int cell-w)
-        stroke-w (parse-int stroke-w)
         cell-dist (+ cell-w stroke-w)]
     (->> (for [line (drop 1 (str/split img-data #"\n"))
                :let [[[x y] rgb] (parse-line line)]
@@ -49,21 +47,43 @@
 
 (defn write-edn
   [data file-path]
-  (spit file-path data))
+  (try (spit file-path data)
+       (println "Output written to: " file-path)
+       (catch Exception e
+         (println "Error writing output: " (.getMessage e)))))
+
+(defn process
+  [input-file cell-w stroke-w]
+  (let [input-file (fs/file input-file)
+        {:keys [data size]} (try (read-image input-file)
+                                 (catch Exception e
+                                   (println "Error processing image: "
+                                            (.getMessage e))))]
+    {:input (str input-file)
+     :params {:cell-width cell-w
+              :stroke-width stroke-w}
+     :output (parse-image-data data size cell-w stroke-w)}))
+
+(def valid-exts #{"png" "jpg"})
+
+(defn batch-process
+  [input-path & args]
+  (let [files (->> (fs/list-dir input-path)
+                   (filter #(and (not (fs/hidden? %))
+                                 (valid-exts (fs/extension %))))
+                   (sort))]
+    (mapv #(apply process % args) files)))
 
 (defn -main [& args]
   (if (< (count args) 2)
-    (println "Usage: ffemul-img2data <input-image> <output-edn> <cell-width> <stroke-width>")
-    (let [[input-file output-file cell-w stroke-w] args
-          {:keys [data size]}
-          (try (read-image input-file)
-               (catch Exception e
-                 (println "Error processing image: " (.getMessage e))))
-          edn-data (parse-image-data data size cell-w stroke-w)]
-      (try (write-edn edn-data output-file)
-           (println "Output written to: " output-file)
-           (catch Exception e
-             (println "Error writing output: " (.getMessage e)))))))
+    (println "Usage: ffemul-img2data <input-file/dir> <output-file> <cell-width> <stroke-width>")
+    (let [[input-path output-file cell-w stroke-w] args
+          cell-w   (parse-int cell-w)
+          stroke-w (parse-int stroke-w)
+          edn-data (if (fs/directory? input-path)
+                     (batch-process input-path cell-w stroke-w)
+                     (process input-path cell-w stroke-w))]
+      (write-edn edn-data output-file))))
 
 (when (= *file* (System/getProperty "babashka.file"))
   (apply -main *command-line-args*))
@@ -72,9 +92,24 @@
 
 (comment
   (def path (str (fs/cwd) "/test/"))
-  (def filename "ex1.png")
+  (def filename "ex-file.png")
 
   (def raw (:out (shell {:out :string} "convert" (str path filename) "txt:")))
+
+  (fs/directory? (str path filename))
+  (fs/directory? (str path "ex-dir/"))
+
+  (str (fs/path "./test/ex-file.png"))
+  (process (str path filename) 3 1)
+
+  (let [valid-exts #{"png" "jpg"}
+        files (->> (fs/list-dir (str path "ex-dir/"))
+                   (filter #(and (not (fs/hidden? %))
+                                 (valid-exts (fs/extension %))))
+                   (sort))]
+    (map #(->> % (fs/relativize (fs/cwd)) str) files)
+    #_
+    (map fs/file-name files))
 
   (parse-size
    (:out (shell {:out :string} "identify" "-format" "%w,%h" (str path filename))))
