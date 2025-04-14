@@ -9,5 +9,13 @@
         :task (apply shell "./bin/ffemul-img2data" *command-line-args*)}
 
   install {:doc "Install the script globally"
-           :task (do ;; TODO
-                   nil)}}}
+           :task (do
+                   ;; create dir when it doesn’t exist
+                   (fs/create-dirs (str (System/getenv "HOME") "/.local/bin"))
+                   ;; copy executable to dir, replacing it if it exists
+                   (fs/copy "bin/ffemul-img2data"
+                            (str (System/getenv "HOME")
+                                 "/.local/bin/ffemul-img2data")
+                            {:copy-attributes true
+                             :replace-existing true}) ;; preserves executable
+                   (println "Installed ffemul-img2data to ~/.local/bin"))}}}
