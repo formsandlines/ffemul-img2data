@@ -3,7 +3,8 @@
 (ns ffemul-img2data
   (:require [babashka.process :refer [shell]]
             [babashka.fs :as fs]
-            ;; [clojure.java.io :as io]
+            [clojure.java.io :as io]
+            [clojure.pprint :as pprint]
             [clojure.edn :as edn]
             [clojure.string :as str]))
 
@@ -27,18 +28,20 @@
 (defn parse-image-data
   [img-data img-size cell-w stroke-w]
   (let [[width _] (parse-size img-size)
-        cell-dist (+ cell-w stroke-w)]
-    (->> (for [line (drop 1 (str/split img-data #"\n"))
-               :let [[[x y] rgb] (parse-line line)]
-               :when (and (= stroke-w (mod x cell-dist))
-                          (= stroke-w (mod y cell-dist)))]
-           (let [[r? g? b? :as xs] (map #(> % 50) rgb)
-                 v (cond r? :U g? :I b? :M
-                         :else :N)]
-             (assert (< (count (filter true? xs)) 2))
-             v))
-         (partitionv (/ width cell-dist))
-         vec)))
+        cell-dist (+ cell-w stroke-w)
+        data (->> (for [line (drop 1 (str/split img-data #"\n"))
+                        :let [[[x y] rgb] (parse-line line)]
+                        :when (and (= stroke-w (mod x cell-dist))
+                                   (= stroke-w (mod y cell-dist)))]
+                    (let [[r? g? b? :as xs] (map #(> % 50) rgb)
+                          v (cond r? :U g? :I b? :M
+                                  :else :N)]
+                      (assert (< (count (filter true? xs)) 2))
+                      v))
+                  (partitionv (/ width cell-dist))
+                  vec)]
+    {:size [(count (first data)) (count data)]
+     :data data}))
 
 (defn read-image
   [input-file]
@@ -47,10 +50,18 @@
 
 (defn write-edn
   [data file-path]
-  (try (spit file-path data)
-       (println "Output written to: " file-path)
-       (catch Exception e
-         (println "Error writing output: " (.getMessage e)))))
+  (let [data-w (let [{:keys [size]} (if (map? data) data (first data))]
+                 (first size))
+        print-right-margin (let [data-row-length (+ 1 (* 3 data-w))]
+                             (+ 7 data-row-length))]
+    (try
+      (with-open [wrtr (io/writer file-path)]
+        (binding [*out* wrtr
+                  pprint/*print-right-margin* print-right-margin]
+          (pprint/pprint data)))
+      (println "Output written to: " file-path)
+      (catch Exception e
+        (println "Error writing output: " (.getMessage e))))))
 
 (defn process
   [input-file cell-w stroke-w]
@@ -58,11 +69,12 @@
         {:keys [data size]} (try (read-image input-file)
                                  (catch Exception e
                                    (println "Error processing image: "
-                                            (.getMessage e))))]
-    {:input (str input-file)
-     :params {:cell-width cell-w
-              :stroke-width stroke-w}
-     :output (parse-image-data data size cell-w stroke-w)}))
+                                            (.getMessage e))))
+        output (parse-image-data data size cell-w stroke-w)]
+    (merge {:input (str input-file)
+            :params {:cell-width cell-w
+                     :stroke-width stroke-w}}
+           output)))
 
 (def valid-exts #{"png" "jpg"})
 
@@ -139,5 +151,12 @@
                       (subs 1 (dec (count rgb-s)))
                       (str/split  #",")))]
     [pos rgb])
+
+  (let [v (vec (repeat 20 :x))]
+    (binding [pprint/*print-right-margin* Integer/MAX_VALUE
+              ;; pprint/*print-miser-width* 61
+              ]
+      (pprint/pprint v)))
+
   
   ,)
