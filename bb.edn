@@ -2,7 +2,7 @@
  :tasks
  {:requires ([babashka.fs :as fs])
   :init (do
-          (def version "0.1.1")
+          (def version "0.1.2")
           (def project-name "ffemul-img2data"))
 
   exec {:doc "Run the script"

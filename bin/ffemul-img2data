@@ -18,27 +18,72 @@
                                 (str/split  #",")))
         rgb (mapv parse-int (-> rgb-s
                                 (subs 1 (dec (count rgb-s)))
-                                (str/split  #",")))]
+                                (str/split  #",")
+                                (subvec 0 3)))]
     [pos rgb]))
 
 (defn parse-size
   [size-s]
   (mapv edn/read-string (str/split size-s #",")))
 
+;; thresholds have been determined by experimentation with real input and should be verified visually for images of lower quality (e.g. from YouTube)
+(defn analyze-rgb
+  "Analyzes rgb values to determine a distinct channel (r, g, b or black)."
+  [rgb]
+  (let [colors (zipmap [:red :green :blue] rgb)
+        [max-k max-v] (apply max-key val colors)]
+    (if (< max-v 70) ;; max threshold to be considered :N
+      :black
+      (let [rem-colors (vals (dissoc colors max-k))
+            diff-ratio (/ max-v (+ (apply max rem-colors)
+                                   ;; to avoid division by zero:
+                                   0.01))]
+        (if (and (> max-v 162) ;; min threshold to be considered :U / :I / :M
+                 (> diff-ratio 1.5)) ;; avoids mixed colors
+          max-k
+          :other)))))
+
+(comment
+  (every? true?
+          [(= :green (analyze-rgb [114 220 135]))
+           (= :black (analyze-rgb [45 45 45]))
+           (= :black (analyze-rgb [0 0 0]))
+           (= :black (analyze-rgb [20 27 14]))
+           (= :black (analyze-rgb [20 54 14]))
+           (= :black (analyze-rgb [20 61 14]))
+           (= :other (analyze-rgb [32 43 88])) ;; grid pixel near a blue cell
+           (= :other (analyze-rgb [0 26 139]))
+           (= :green (analyze-rgb [70 175 73]))
+           (= :other (analyze-rgb [149 50 32]))
+           (= :other (analyze-rgb [95 39 29]))
+           (= :black (analyze-rgb [68 51 1]))
+           (= :black (analyze-rgb [66 47 0]))
+           (= :black (analyze-rgb [0 11 50])) ;; color bleed at low quality
+           (= :black (analyze-rgb [0 13 62])) ;; color bleed at low quality
+           (= :blue (analyze-rgb [7 0 171])) ;; limit case at low quality
+           (= :blue (analyze-rgb [1 0 166])) ;; limit case at low quality
+           (= :black (analyze-rgb [69 14 0])) ;; color bleed at low quality
+           (= :blue (analyze-rgb [7 0 165])) ;; limit case at low quality
+           ])
+  ,)
+
 (defn parse-image-data
   [img-data img-size cell-w stroke-w]
   (let [[width _] (parse-size img-size)
         cell-dist (+ cell-w stroke-w)
+        cell-center (int (/ cell-w 2.0))
+        shift (+ stroke-w cell-center)
         data (->> (for [line (drop 1 (str/split img-data #"\n"))
                         :let [[[x y] rgb] (parse-line line)]
-                        :when (and (= stroke-w (mod x cell-dist))
-                                   (= stroke-w (mod y cell-dist)))]
-                    (let [[r? g? b? :as xs] (map #(> % 50) rgb)
-                          v (cond r? :U g? :I b? :M
-                                  :else :N)]
-                      (assert (< (count (filter true? xs)) 2))
+                        :when (and (= shift (mod x cell-dist))
+                                   (= shift (mod y cell-dist)))]
+                    (let [color (analyze-rgb rgb)
+                          v (case color
+                              :red :U :green :I :blue :M :black :N
+                              (throw (ex-info "Invalid color."
+                                              {:color rgb})))]
                       v))
-                  (partitionv (/ width cell-dist))
+                  (partitionv (int (/ width cell-dist)))
                   vec)]
     {:size [(count (first data)) (count data)]
      :data data}))
@@ -65,6 +110,7 @@
 
 (defn process
   [input-file cell-w stroke-w]
+  (println "Processing " input-file " …")
   (let [input-file (fs/file input-file)
         {:keys [data size]} (try (read-image input-file)
                                  (catch Exception e
@@ -105,14 +151,19 @@
 (comment
   (def path (str (fs/cwd) "/test/"))
   (def filename "ex-file.png")
+  (def filename "ex-lowquality.png")
+  (def file (str path filename))
 
+  (parse-line "1,0: (115,31,22,255)  #731F16FF  srgba(115,31,22,1)")
+  
   (def raw (:out (shell {:out :string} "convert" (str path filename) "txt:")))
 
-  (fs/directory? (str path filename))
+  (fs/directory? file)
   (fs/directory? (str path "ex-dir/"))
 
   (str (fs/path "./test/ex-file.png"))
-  (process (str path filename) 3 1)
+  (parse-size (:size (read-image (fs/file (str path filename)))))
+  (process (str path filename) 2 1)
 
   (let [valid-exts #{"png" "jpg"}
         files (->> (fs/list-dir (str path "ex-dir/"))
